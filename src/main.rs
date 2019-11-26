@@ -1,4 +1,4 @@
-use std::io::{ stdin, BufRead, Read };
+use std::io::{ stdin, Read };
 use nix::unistd::Pid;
 use nix::sys::ptrace::{ attach, detach, cont, read, write, getregs, setregs, step };
 use nix::sys::wait::{ waitpid, WaitPidFlag, WaitStatus };
@@ -6,7 +6,6 @@ use nix::sys::signal::Signal;
 
 fn main() {
     let mut playback = false;
-    let mut pid: Option<Pid> = None;
     for arg in std::env::args() {
         if arg == "playback" {
             playback = true;
@@ -52,6 +51,7 @@ fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut reg = getregs(pid)?;
+        // reset instruction pointer to correct address
         reg.rip = 0x1413C7D9A;
 
         if skips == 0 {
@@ -66,7 +66,6 @@ fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
             }
             let input = u64::from_str_radix(line, 16)?;
 
-            // reset instruction pointer to correct address
             reg.rbx = input;
         } else {
             skips -= 1;
