@@ -22,7 +22,7 @@ fn main() {
             }
         }
 
-        let pid = pid.unwrap_or_else(|| { println!("No such process"); std::process::exit(0) });
+        let pid = pid.unwrap_or_else(|| { println!("No such process"); std::process::exit(1) });
         println!("{}", pid);
         attach(pid).unwrap();
         waitpid(pid, None).unwrap();
@@ -33,58 +33,71 @@ fn main() {
     }
 }
 
-fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
-    let original_word = read(pid, 0x1413C7D9A as *mut _)?;
-    let mut skips = 164;
+fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
+    // set breakpoint
+    let original_word = read(pid, addr as *mut _)?;
+    write(pid, addr as *mut _, (original_word & !0xFF | 0xCC) as *mut _);
 
+    // wait for PPT to hit the breakpoint
+    cont(pid, None)?;
+    wait_for_trap(pid)?;
+
+    // replace original instruction
+    write(pid, addr as *mut _, original_word as *mut _)?;
+
+    // fix instructcion pointer
+    let mut regs = getregs(pid)?;
+    regs.rip = addr;
+    setregs(pid, regs)
+}
+
+fn wait_for_trap(pid: Pid) -> Result<(), nix::Error> {
     loop {
-        // set breakpoint
-        write(pid, 0x1413C7D9A as *mut _, (original_word & !0xFF | 0xCC) as _)?;
-        cont(pid, None)?;
-
-        loop {
-            match waitpid(pid, Some(WaitPidFlag::WSTOPPED))? {
-                WaitStatus::Stopped(_, Signal::SIGTRAP) => break,
-                WaitStatus::Stopped(_, signal) => cont(pid, signal)?,
-                unknown => eprintln!("Something happened, but we don't know what: {:#?}", unknown)
-            }
+        match waitpid(pid, Some(WaitPidFlag::WSTOPPED))? {
+            WaitStatus::Stopped(_, Signal::SIGTRAP) => return Ok(()),
+            WaitStatus::Stopped(_, signal) => cont(pid, signal)?,
+            unknown => eprintln!("Something happened, but we don't know what: {:#?}", unknown)
         }
+    }
+}
 
-        let mut reg = getregs(pid)?;
-        // reset instruction pointer to correct address
-        reg.rip = 0x1413C7D9A;
+fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
+    // breakpoint for initial RNG
+    breakpoint(pid, 0x14003F86B)?;
+
+    let seed = match read_hex()? {
+        Some(v) => v,
+        None => return Ok(())
+    };
+    let mut regs = getregs(pid)?;
+    // game expects rng to be in rax
+    regs.rax = seed;
+    setregs(pid, regs)?;
+
+    // TODO: make the work by pressing start over (148 frames before timer starts)
+    let mut skips = 164;
+    loop {
+        // breakpoint for input system
+        breakpoint(pid, 0x1413C7D9A)?;
 
         if skips == 0 {
-            let mut line = String::new();
-            stdin().read_line(&mut line)?;
-            let line = line.trim();
-            if line.is_empty() {
-                // remove breakpoint
-                write(pid, 0x1413C7D9A as *mut _, original_word as *mut _)?;
-                setregs(pid, reg)?;
-                break
-            }
-            let input = u64::from_str_radix(line, 16)?;
+            let input = match read_hex()? {
+                Some(v) => v,
+                None => return Ok(())
+            };
 
-            reg.rbx = input;
+            let mut regs = getregs(pid)?;
+            // game expects input bitfield to be in rbx
+            regs.rbx = input;
+            setregs(pid, regs)?;
         } else {
             skips -= 1;
         }
-        setregs(pid, reg)?;
 
         // advance past breakpoint
-        write(pid, 0x1413C7D9A as *mut _, original_word as *mut _)?;
         step(pid, None)?;
-
-        loop {
-            match waitpid(pid, Some(WaitPidFlag::WSTOPPED))? {
-                WaitStatus::Stopped(_, Signal::SIGTRAP) => break,
-                WaitStatus::Stopped(_, signal) => cont(pid, signal)?,
-                unknown => eprintln!("Something happened, but we don't know what: {:#?}", unknown)
-            }
-        }
+        wait_for_trap(pid)?;
     }
-    Ok(())
 }
 
 fn check(entry: &str) -> Option<Pid> {
@@ -98,4 +111,14 @@ fn check(entry: &str) -> Option<Pid> {
     } else {
         None
     }
+}
+
+fn read_hex() -> Result<Option<u64>, Box<dyn std::error::Error>> {
+    let mut line = String::new();
+    stdin().read_line(&mut line)?;
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(None)
+    }
+    Ok(Some(u64::from_str_radix(line, 16)?))
 }
