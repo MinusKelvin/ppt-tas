@@ -65,7 +65,7 @@ pub struct PieceGenerator {
 impl PieceGenerator {
     pub fn new(seed: u32) -> Self {
         let mut seed = seed;
-        for _ in 0..1987 {
+        for _ in 0..1973 {
             seed = roll(seed);
         }
         PieceGenerator {
@@ -83,7 +83,7 @@ impl PieceGenerator {
         }
 
         self.rng = roll(self.rng);
-        let index = ((self.rng >> 16) * (7 - self.index as u32)) >> 16 + self.index as u32;
+        let index = (((self.rng >> 16) * (7 - self.index as u32)) >> 16) + self.index as u32;
         self.bag.swap(self.index as usize, index as usize);
         let piece = self.bag[self.index as usize];
         self.index += 1;

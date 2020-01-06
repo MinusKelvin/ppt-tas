@@ -27,6 +27,11 @@ fn main() {
         #[cfg(not(unix))]
         eprintln!("Playback is currently only supported on Linux.");
     } else {
-
+        let mut rng = gameplay::PieceGenerator::new(0x1AC2);
+        print!("#Q=[]({:?})", rng.next());
+        for _ in 0..500 {
+            print!("{:?}", rng.next());
+        }
+        println!();
     }
 }

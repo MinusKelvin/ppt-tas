@@ -26,7 +26,7 @@ pub fn playback() {
 
 fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
     // breakpoint for initial RNG
-    breakpoint(pid, 0x14003F86B)?;
+    breakpoint(pid, 0x14003F876)?;
 
     let seed = match read_hex()? {
         Some(v) => v,
@@ -34,7 +34,8 @@ fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut regs = getregs(pid)?;
     // game expects rng to be in rax
-    regs.rax = seed;
+    // game shifts down by 16 bits so the seed is only 16 bits large
+    regs.rax = (seed & 0xFFFF) << 16;
     setregs(pid, regs)?;
 
     // TODO: make the work by pressing start over (148 frames before timer starts)
@@ -98,7 +99,7 @@ fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
     // replace original instruction
     write(pid, addr as *mut _, original_word as *mut _)?;
 
-    // fix instructcion pointer
+    // fix instruction pointer
     let mut regs = getregs(pid)?;
     regs.rip = addr;
     setregs(pid, regs)
