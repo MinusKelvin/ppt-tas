@@ -125,8 +125,8 @@ fn read_input() -> Result<Option<(u64, u64)>, Box<dyn std::error::Error>> {
     }
     let repeat = match repeat_index {
         Some(start) => match repeat_end {
-            Some(end) => u64::from_str_radix(dbg!(&line[start..end]), 10)?,
-            None => u64::from_str_radix(dbg!(&line[start..].trim()), 10)?
+            Some(end) => u64::from_str_radix(&line[start..end], 10)?,
+            None => u64::from_str_radix(&line[start..].trim(), 10)?
         }
         None => 1
     };
