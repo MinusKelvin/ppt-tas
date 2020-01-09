@@ -35,7 +35,7 @@ R
 <
 _
 <
-v 53
+v 53 time for the overlap bug
 L
 R
 L
@@ -51,7 +51,7 @@ R
 L
 R
 L
->R
+>R 1 boom, overlapped
 _ 8
 >
 _

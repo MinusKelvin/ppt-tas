@@ -103,28 +103,34 @@ fn read_input() -> Result<Option<(u64, u64)>, Box<dyn std::error::Error>> {
         return Ok(None)
     }
     let mut input = 0;
-    let mut repeat_index = 0;
+    let mut repeat_index = None;
+    let mut repeat_end = None;
     for (i, c) in line.char_indices() {
         match c.to_ascii_lowercase() {
-            '<' => input |= 0x01,
-            '>' => input |= 0x02,
-            'd' => input |= 0x04,
-            'v' => input |= 0x08,
-            'l' => input |= 0x10,
-            'r' => input |= 0x20,
-            'h' => input |= 0x40,
-            '0'..='9' => {
-                repeat_index = i;
-                break
+            '<' if repeat_index.is_none() => input |= 0x01,
+            '>' if repeat_index.is_none() => input |= 0x02,
+            'd' if repeat_index.is_none() => input |= 0x04,
+            'v' if repeat_index.is_none() => input |= 0x08,
+            'l' if repeat_index.is_none() => input |= 0x10,
+            'r' if repeat_index.is_none() => input |= 0x20,
+            'h' if repeat_index.is_none() => input |= 0x40,
+            '0'..='9' => if repeat_index.is_none() {
+                repeat_index = Some(i);
+            }
+            ' ' => if repeat_index.is_some() && repeat_end.is_none() {
+                repeat_end = Some(i);
             }
             _ => {}
         }
     }
-    let blank_frames = match u64::from_str_radix(&line[repeat_index..].trim(), 10) {
-        Ok(v) => v.max(1),
-        Err(_) => 1
+    let repeat = match repeat_index {
+        Some(start) => match repeat_end {
+            Some(end) => u64::from_str_radix(dbg!(&line[start..end]), 10)?,
+            None => u64::from_str_radix(dbg!(&line[start..].trim()), 10)?
+        }
+        None => 1
     };
-    Ok(Some((input, blank_frames)))
+    Ok(Some((input, repeat)))
 }
 
 fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
