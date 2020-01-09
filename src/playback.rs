@@ -26,7 +26,7 @@ pub fn playback() {
 
 fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
     // breakpoint for initial RNG
-    breakpoint(pid, 0x14003F876)?;
+    breakpoint(pid, 0x14003F87F)?;
 
     let seed = match read_hex()? {
         Some(v) => v,
@@ -35,25 +35,34 @@ fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
     let mut regs = getregs(pid)?;
     // game expects rng to be in rax
     // game shifts down by 16 bits so the seed is only 16 bits large
-    regs.rax = (seed & 0xFFFF) << 16;
+    // altering this line allows impossible seeds to be used (such as the one for the 19.96s sprint
+    // TAS), which lets us see what could have been if sega hadn't clipped the seed space.
+    regs.rax = seed & 0xFFFF;
     setregs(pid, regs)?;
 
     // TODO: make the work by pressing start over (148 frames before timer starts)
     let mut skips = 164;
+    let mut input = 0;
+    let mut repeats = 0;
     loop {
         // breakpoint for input system
         breakpoint(pid, 0x1413C7D9A)?;
 
         if skips == 0 {
-            let input = match read_hex()? {
-                Some(v) => v,
-                None => return Ok(())
-            };
+            if repeats == 0 {
+                let (i, r) = match read_input()? {
+                    Some(v) => v,
+                    None => return Ok(())
+                };
+                input = i;
+                repeats = r;
+            }
 
             let mut regs = getregs(pid)?;
             // game expects input bitfield to be in rbx
             regs.rbx = input;
             setregs(pid, regs)?;
+            repeats -= 1;
         } else {
             skips -= 1;
         }
@@ -85,6 +94,37 @@ fn read_hex() -> Result<Option<u64>, Box<dyn std::error::Error>> {
         return Ok(None)
     }
     Ok(Some(u64::from_str_radix(line, 16)?))
+}
+
+fn read_input() -> Result<Option<(u64, u64)>, Box<dyn std::error::Error>> {
+    let mut line = String::new();
+    stdin().read_line(&mut line)?;
+    if line.is_empty() {
+        return Ok(None)
+    }
+    let mut input = 0;
+    let mut repeat_index = 0;
+    for (i, c) in line.char_indices() {
+        match c.to_ascii_lowercase() {
+            '<' => input |= 0x01,
+            '>' => input |= 0x02,
+            'd' => input |= 0x04,
+            'v' => input |= 0x08,
+            'l' => input |= 0x10,
+            'r' => input |= 0x20,
+            'h' => input |= 0x40,
+            '0'..='9' => {
+                repeat_index = i;
+                break
+            }
+            _ => {}
+        }
+    }
+    let blank_frames = match u64::from_str_radix(&line[repeat_index..].trim(), 10) {
+        Ok(v) => v.max(1),
+        Err(_) => 1
+    };
+    Ok(Some((input, blank_frames)))
 }
 
 fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
