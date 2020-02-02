@@ -7,8 +7,20 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bitflags = "1.2"
-rand = "0.7"
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.15"
+
+[target.'cfg(windows)'.dependencies.winapi]
+version = "0.3.8"
+features = [
+    "impl-default",
+    "psapi",
+    "processthreadsapi",
+    "winnt",
+    "handleapi",
+    "memoryapi",
+    "debugapi",
+    "winbase",
+    "minwinbase"
+]

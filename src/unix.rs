@@ -1,10 +1,15 @@
-use std::io::{ stdin, Read };
-use nix::unistd::Pid;
+use crate::Result;
+use nix::unistd::{ Pid, geteuid };
 use nix::sys::ptrace::{ attach, detach, cont, read, write, getregs, setregs, step };
 use nix::sys::wait::{ waitpid, WaitPidFlag, WaitStatus };
 use nix::sys::signal::Signal;
 
-pub fn playback() {
+pub fn playback() -> Result<()> {
+    if !geteuid().is_root() {
+        eprintln!("Need root permissions to playback a TAS.");
+        std::process::exit(2);
+    }
+
     let mut pid = None;
     for path in std::fs::read_dir("/proc").unwrap() {
         let name = path.unwrap().file_name();
@@ -16,19 +21,17 @@ pub fn playback() {
 
     let pid = pid.unwrap_or_else(|| { println!("No such process"); std::process::exit(1) });
     println!("{}", pid);
-    attach(pid).unwrap();
-    waitpid(pid, None).unwrap();
-    if let Err(e) = play(pid) {
-        eprintln!("An error occured: {}", e)
-    }
-    detach(pid).unwrap();
+    attach(pid)?;
+    waitpid(pid, None)?;
+    play(pid)?;
+    detach(pid)
 }
 
-fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
+fn play(pid: Pid) -> Result<()> {
     // breakpoint for initial RNG
     breakpoint(pid, 0x14003F87F)?;
 
-    let seed = match read_hex()? {
+    let seed = match crate::read_hex()? {
         Some(v) => v,
         None => return Ok(())
     };
@@ -50,7 +53,7 @@ fn play(pid: Pid) -> Result<(), Box<dyn std::error::Error>> {
 
         if skips == 0 {
             if repeats == 0 {
-                let (i, r) = match read_input()? {
+                let (i, r) = match crate::read_input()? {
                     Some(v) => v,
                     None => return Ok(())
                 };
@@ -86,54 +89,7 @@ fn check(entry: &str) -> Option<Pid> {
     }
 }
 
-fn read_hex() -> Result<Option<u64>, Box<dyn std::error::Error>> {
-    let mut line = String::new();
-    stdin().read_line(&mut line)?;
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(None)
-    }
-    Ok(Some(u64::from_str_radix(line, 16)?))
-}
-
-fn read_input() -> Result<Option<(u64, u64)>, Box<dyn std::error::Error>> {
-    let mut line = String::new();
-    stdin().read_line(&mut line)?;
-    if line.is_empty() {
-        return Ok(None)
-    }
-    let mut input = 0;
-    let mut repeat_index = None;
-    let mut repeat_end = None;
-    for (i, c) in line.char_indices() {
-        match c.to_ascii_lowercase() {
-            '<' if repeat_index.is_none() => input |= 0x01,
-            '>' if repeat_index.is_none() => input |= 0x02,
-            'd' if repeat_index.is_none() => input |= 0x04,
-            'v' if repeat_index.is_none() => input |= 0x08,
-            'l' if repeat_index.is_none() => input |= 0x10,
-            'r' if repeat_index.is_none() => input |= 0x20,
-            'h' if repeat_index.is_none() => input |= 0x40,
-            '0'..='9' => if repeat_index.is_none() {
-                repeat_index = Some(i);
-            }
-            ' ' => if repeat_index.is_some() && repeat_end.is_none() {
-                repeat_end = Some(i);
-            }
-            _ => {}
-        }
-    }
-    let repeat = match repeat_index {
-        Some(start) => match repeat_end {
-            Some(end) => u64::from_str_radix(&line[start..end], 10)?,
-            None => u64::from_str_radix(&line[start..].trim(), 10)?
-        }
-        None => 1
-    };
-    Ok(Some((input, repeat)))
-}
-
-fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
+fn breakpoint(pid: Pid, addr: u64) -> Result<()> {
     // set breakpoint
     let original_word = read(pid, addr as *mut _)?;
     write(pid, addr as *mut _, (original_word & !0xFF | 0xCC) as *mut _)?;
@@ -151,7 +107,7 @@ fn breakpoint(pid: Pid, addr: u64) -> Result<(), nix::Error> {
     setregs(pid, regs)
 }
 
-fn wait_for_trap(pid: Pid) -> Result<(), nix::Error> {
+fn wait_for_trap(pid: Pid) -> Result<()> {
     loop {
         match waitpid(pid, Some(WaitPidFlag::WSTOPPED))? {
             WaitStatus::Stopped(_, Signal::SIGTRAP) => return Ok(()),
